@@ -1,13 +1,21 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using Newtonsoft.Json;
 using UnityEngine;
 using Facepunch;
 using System.Linq;
+using Oxide.Core;
 
-namespace Oxide.Plugins {
-    [Info("Auto Plant", "Egor Blagov / rostov114", "1.1.0")]
+namespace Oxide.Plugins
+{
+    [Info("Auto Plant", "Egor Blagov / rostov114", "1.2.1")]
     [Description("Automation of your plantations")]
-    class AutoPlant : RustPlugin {
+    class AutoPlant : RustPlugin
+    {
+        #region Variables
+        public static AutoPlant _instance;
+        private List<ulong> _activeUse = new List<ulong>();
+        #endregion
 
         #region Configuration
         private Configuration _config;
@@ -24,6 +32,21 @@ namespace Oxide.Plugins {
 
             [JsonProperty(PropertyName = "Auto Remove Dying permission")]
             public string autoDying = "autoplant.removedying.use";
+
+            [JsonProperty(PropertyName = "Auto fertilizer permission")]
+            public string autoFertilizer = "autoplant.fertilizer.use";
+            
+            [JsonProperty(PropertyName = "Auto fertilizer configuration")]
+            public FertilizerConfiguration fertilizer = new FertilizerConfiguration();
+            
+            public class FertilizerConfiguration
+            {
+                [JsonProperty(PropertyName = "Maximum distance from the PlanterBox")]
+                public int maxDistance = 5;
+
+                [JsonProperty(PropertyName = "Default fertilizer amount")]
+                public int defaultAmount = 100;
+            }
         }
 
         protected override void LoadConfig()
@@ -32,6 +55,7 @@ namespace Oxide.Plugins {
             try
             {
                 _config = Config.ReadObject<Configuration>();
+                SaveConfig();
             }
             catch
             {
@@ -41,6 +65,8 @@ namespace Oxide.Plugins {
                 Unsubscribe(nameof(CanTakeCutting));
                 Unsubscribe(nameof(OnRemoveDying));
                 Unsubscribe(nameof(OnEntityBuilt));
+                Unsubscribe(nameof(OnActiveItemChanged));
+                Unsubscribe(nameof(OnPlayerInput));
             }
         }
 
@@ -53,26 +79,101 @@ namespace Oxide.Plugins {
         protected override void SaveConfig() => Config.WriteObject(_config);
         #endregion
 
+        #region Data
+        private Dictionary<ulong, int> _data = new Dictionary<ulong, int>();
+        public static class Data
+        {
+            public static int Get(ulong userID)
+            {
+                if (_instance._data.ContainsKey(userID))
+                {
+                    return _instance._data[userID];
+                }
+
+                return _instance._config.fertilizer.defaultAmount;
+            }
+
+            public static void Set(ulong userID, int amount)
+            {
+                _instance._data[userID] = amount;
+                Data.Save();
+            }
+
+            public static void Save()
+            {
+                Interface.Oxide.DataFileSystem.WriteObject(_instance.Name, _instance._data);
+            }
+
+            public static void Load()
+            {
+                try
+                {
+                    _instance._data = Interface.Oxide.DataFileSystem.ReadObject<Dictionary<ulong, int>>(_instance.Name);
+                }
+                catch (Exception e)
+                {
+                    _instance.PrintError(e.Message);
+
+                    _instance.Unsubscribe(nameof(OnActiveItemChanged));
+                    _instance.Unsubscribe(nameof(OnPlayerInput));
+                }
+            }
+        }
+        #endregion
+
+        #region Language
+        private void LoadDefaultMessages()
+        {
+            lang.RegisterMessages(new Dictionary<string, string>()
+            {
+                {"notAllowed", "You are not allowed to use this command!"},
+                {"changeAmount", "The amount of fertilizer transferred has been changed to {0} pcs."},
+                {"currentAmount", "Current amount of fertilizer transferred: {0} pcs."}
+            }, this, "en"); 
+            
+            lang.RegisterMessages(new Dictionary<string, string>() 
+            {
+                {"notAllowed", "Вам не разрешено использование данной команды!" },
+                {"changeAmount", "Количество перекладываемого удобрения изменено на {0} шт." },
+                {"currentAmount", "Текущее количество перекладываемого удобрения: {0} шт." },
+            }, this, "ru"); 
+        }
+
+        private string _(BasePlayer player, string key, params object[] args)
+        {
+            return string.Format(lang.GetMessage(key, this, player?.UserIDString), args);
+        }
+        #endregion
+
         #region Oxide Hooks
-        private void Init() 
+        private void Init()
         {
             permission.RegisterPermission(_config.autoPlant, this);
             permission.RegisterPermission(_config.autoGather, this);
             permission.RegisterPermission(_config.autoCutting, this);
             permission.RegisterPermission(_config.autoDying, this);
+            permission.RegisterPermission(_config.autoFertilizer, this);
+
+            checkSubscribeHooks();
+        }
+
+        private void Loaded()
+        {
+            _instance = this;
+            Data.Load();
         }
 
         private object OnGrowableGather(GrowableEntity plant, BasePlayer player)
         {
-            if (!this.CheckUsing(player, plant, _config.autoGather))
+            PlanterBox planterBox = this.GetPlanterBox(player, plant, _config.autoGather);
+            if (planterBox == null)
                 return null;
-
-            PlanterBox planterBox = plant.GetParentEntity() as PlanterBox;
 
             Unsubscribe(nameof(OnGrowableGather));
             foreach (GrowableEntity growable in planterBox.children.ToList())
             {
-                growable.PickFruit(player);
+                if (growable != null)
+                    growable.PickFruit(player);
             }
             Subscribe(nameof(OnGrowableGather));
 
@@ -81,18 +182,15 @@ namespace Oxide.Plugins {
 
         private object CanTakeCutting(BasePlayer player, GrowableEntity plant)
         {
-            if (!this.CheckUsing(player, plant, _config.autoCutting))
+            PlanterBox planterBox = this.GetPlanterBox(player, plant, _config.autoCutting);
+            if (planterBox == null)
                 return null;
-
-            PlanterBox planterBox = plant.GetParentEntity() as PlanterBox;
 
             Unsubscribe(nameof(CanTakeCutting));
             foreach (GrowableEntity growable in planterBox.children.ToList())
             {
-                if (growable.CanClone())
-                {
+                if (growable != null)
                     growable.TakeClones(player);
-                }
             }
             Subscribe(nameof(CanTakeCutting));
 
@@ -101,15 +199,15 @@ namespace Oxide.Plugins {
 
         private object OnRemoveDying(GrowableEntity plant, BasePlayer player)
         {
-            if (!this.CheckUsing(player, plant, _config.autoDying))
+            PlanterBox planterBox = this.GetPlanterBox(player, plant, _config.autoDying);
+            if (planterBox == null)
                 return null;
-
-            PlanterBox planterBox = plant.GetParentEntity() as PlanterBox;
 
             Unsubscribe(nameof(OnRemoveDying));
             foreach (GrowableEntity growable in planterBox.children.ToList())
             {
-                growable.RemoveDying(player);
+                if (growable != null)
+                    growable.RemoveDying(player);
             }
             Subscribe(nameof(OnRemoveDying));
 
@@ -172,9 +270,100 @@ namespace Oxide.Plugins {
                 }
             });
         }
+
+        private void OnActiveItemChanged(BasePlayer player, Item oldItem, Item newItem)
+        {
+            if (player == null)
+                return;
+
+            if (newItem != null && newItem.info.shortname == "fertilizer")
+            {
+                if (permission.UserHasPermission(player.UserIDString, _config.autoFertilizer))
+                {
+                    _activeUse.Add(player.userID);
+                    checkSubscribeHooks();
+                }
+            }
+            else
+            {
+                if (_activeUse.Contains(player.userID))
+                {
+                    _activeUse.Remove(player.userID);
+                    checkSubscribeHooks();
+                }
+            }
+        }
+
+        private void OnPlayerInput(BasePlayer player, InputState input)
+        {
+            if (_activeUse.Contains(player.userID) && input.WasJustReleased(BUTTON.FIRE_PRIMARY))
+            {
+                Item activeItem = player.GetActiveItem();
+                if (activeItem == null)
+                    return;
+
+                if (activeItem.info.shortname != "fertilizer")
+                    return;
+
+                PlanterBox planterBox;
+                if (IsLookingPlanterBox(player, out planterBox))
+                {
+                    int amount = Data.Get(player.userID);
+                    Item moveItem = (amount >= activeItem.amount) ? activeItem : activeItem.SplitItem(amount);
+
+                    player.Command("note.inv", (object)moveItem.info.itemid, (object)-moveItem.amount);
+                    EffectNetwork.Send(new Effect("assets/bundled/prefabs/fx/impacts/physics/phys-impact-meat-soft.prefab", player, 0, new Vector3(), new Vector3()), player.Connection);
+
+                    if (!moveItem.MoveToContainer(planterBox.inventory, -1, true))
+                    {
+                        moveItem.Drop(player.GetDropPosition(), player.GetDropVelocity(), default(Quaternion));
+                    }
+                }
+            }
+        }
+        #endregion
+
+        #region Chat Command
+        [ChatCommand("fertilizer")]
+        private void fertilizer_command(BasePlayer player, string command, string[] args)
+        {
+            if (!permission.UserHasPermission(player.UserIDString, _config.autoFertilizer))
+            {
+                SendReply(player, _(player, "notAllowed"));
+                return;
+            }
+
+            if (args.Length == 0)
+            {
+                SendReply(player, _(player, "currentAmount", Data.Get(player.userID)));
+                return;
+            }
+
+            int amount = _config.fertilizer.defaultAmount;
+            try
+            {
+                amount = Int32.Parse(args[0]);
+            }
+            catch { }
+
+            Data.Set(player.userID, amount);
+            SendReply(player, _(player, "changeAmount", amount));
+        }
         #endregion
 
         #region Helpers
+        public void checkSubscribeHooks()
+        {
+            if (_activeUse.Count > 0)
+            {
+                Subscribe(nameof(OnPlayerInput));
+            }
+            else
+            {
+                Unsubscribe(nameof(OnPlayerInput));
+            }
+        }
+
         public bool IsFree(Construction common, Construction.Target target) 
         {
             List<Socket_Base> list = Facepunch.Pool.GetList<Socket_Base>();
@@ -184,15 +373,38 @@ namespace Oxide.Plugins {
             return !target.entity.IsOccupied(target.socket) && socketBase.CheckSocketMods(socketBase.DoPlacement(target));
         }
 
-        public bool CheckUsing(BasePlayer player, GrowableEntity plant, string perm)
+        public PlanterBox GetPlanterBox(BasePlayer player, GrowableEntity plant, string perm)
         {
             if (player == null || plant == null || !permission.UserHasPermission(player.UserIDString, perm))
-                return false;
+                return null;
 
             if (player.serverInput.IsDown(BUTTON.SPRINT) && plant.GetParentEntity() is PlanterBox)
-                return true;
+            {
+                PlanterBox planterBox = plant.GetParentEntity() as PlanterBox;
+                if (planterBox == null || planterBox?.children == null || planterBox.children.Count == 0)
+                    return null;
 
-            return false;
+                return planterBox;
+            }
+
+            return null;
+        }
+
+        private bool IsLookingPlanterBox(BasePlayer player, out PlanterBox planterBox)
+        {
+            RaycastHit hit;
+            planterBox = null;
+
+            if (Physics.Raycast(player.eyes.HeadRay(), out hit, _config.fertilizer.maxDistance, LayerMask.GetMask("Deployed")))
+            {
+                BaseEntity entity = hit.GetEntity();
+                if (entity is PlanterBox)
+                {
+                    planterBox = entity as PlanterBox;
+                }
+            }
+
+            return planterBox != null;
         }
         #endregion
     }
