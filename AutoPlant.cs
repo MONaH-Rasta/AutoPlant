@@ -1,4 +1,6 @@
-﻿using System;
+﻿// #define DEBUG
+
+using System;
 using System.Collections.Generic;
 using Newtonsoft.Json;
 using UnityEngine;
@@ -8,7 +10,7 @@ using Oxide.Core;
 
 namespace Oxide.Plugins
 {
-    [Info("Auto Plant", "Egor Blagov / rostov114", "1.2.4")]
+    [Info("Auto Plant", "Egor Blagov / rostov114", "1.2.5")]
     [Description("Automation of your plantations")]
     class AutoPlant : RustPlugin
     {
@@ -172,11 +174,13 @@ namespace Oxide.Plugins
 
         private object OnGrowableGather(GrowableEntity plant, BasePlayer player)
         {
+            if (plant.IsBusy())
+                return null;
+
             List<BaseEntity> growables;
             if (!this.GetGrowables(player, plant, _config.autoGather, out growables))
                 return null;
 
-            Unsubscribe(nameof(OnGrowableGather));
             foreach (BaseEntity growable in growables)
             {
                 if (growable != null && growable is GrowableEntity)
@@ -184,22 +188,25 @@ namespace Oxide.Plugins
                     GrowableEntity _growable = growable as GrowableEntity;
                     if (_growable != null)
                     {
+                        _growable.SetFlag(BaseEntity.Flags.Busy, true, false, false);
                         _growable.PickFruit(player);
+                        _growable.SetFlag(BaseEntity.Flags.Busy, false, false, false);
                     }
                 }
             }
-            Subscribe(nameof(OnGrowableGather));
 
             return true;
         }
 
         private object CanTakeCutting(BasePlayer player, GrowableEntity plant)
         {
+            if (plant.IsBusy())
+                return null;
+
             List<BaseEntity> growables;
             if (!this.GetGrowables(player, plant, _config.autoCutting, out growables))
                 return null;
 
-            Unsubscribe(nameof(CanTakeCutting));
             foreach (BaseEntity growable in growables)
             {
                 if (growable != null && growable is GrowableEntity)
@@ -207,22 +214,25 @@ namespace Oxide.Plugins
                     GrowableEntity _growable = growable as GrowableEntity;
                     if (_growable != null)
                     {
+                        _growable.SetFlag(BaseEntity.Flags.Busy, true, false, false);
                         _growable.TakeClones(player);
+                        _growable.SetFlag(BaseEntity.Flags.Busy, false, false, false);
                     }
                 }
             }
-            Subscribe(nameof(CanTakeCutting));
 
             return true;
         }
 
         private object OnRemoveDying(GrowableEntity plant, BasePlayer player)
         {
+            if (plant.IsBusy())
+                return null;
+
             List<BaseEntity> growables;
             if (!this.GetGrowables(player, plant, _config.autoDying, out growables))
                 return null;
 
-            Unsubscribe(nameof(OnRemoveDying));
             foreach (BaseEntity growable in growables)
             {
                 if (growable != null && growable is GrowableEntity)
@@ -230,17 +240,21 @@ namespace Oxide.Plugins
                     GrowableEntity _growable = growable as GrowableEntity;
                     if (_growable != null)
                     {
+                        _growable.SetFlag(BaseEntity.Flags.Busy, true, false, false);
                         _growable.RemoveDying(player);
+                        _growable.SetFlag(BaseEntity.Flags.Busy, false, false, false);
                     }
                 }
             }
-            Subscribe(nameof(OnRemoveDying));
 
             return true;
         }
 
         private void OnEntityBuilt(Planner plan, GameObject seed) 
         {
+            if (plan.IsBusy())
+                return;
+
             BasePlayer player = plan.GetOwnerPlayer();
             GrowableEntity plant = seed.GetComponent<GrowableEntity>();
             if (player == null || plant == null || !permission.UserHasPermission(player.UserIDString, _config.autoPlant))
@@ -282,14 +296,14 @@ namespace Oxide.Plugins
                         targets.Add(target);
                     }
 
-                    Unsubscribe(nameof(OnEntityBuilt));
+                    plan.SetFlag(BaseEntity.Flags.Busy, true, false, false);
                     foreach (Construction.Target target in targets) 
                     {
                         plan.DoBuild(target, construction);
                         if (held.amount == 0)
                             break;
                     }
-                    Subscribe(nameof(OnEntityBuilt));
+                    plan.SetFlag(BaseEntity.Flags.Busy, false, false, false);
 
                     Pool.FreeList(ref targets);
                 }
@@ -346,6 +360,18 @@ namespace Oxide.Plugins
                 }
             }
         }
+#if DEBUG
+        private void OnHammerHit(BasePlayer player, HitInfo info) 
+        {
+            if (player == null || info == null || info?.HitEntity == null) 
+                return;
+
+            if (player.IsAdmin && player.serverInput.IsDown(BUTTON.FIRE_SECONDARY) && (info.HitEntity is PlanterBox))
+            {
+                (info.HitEntity as PlanterBox).DoSplash(ItemManager.FindItemDefinition("water"), 9000);
+            }
+        }
+#endif
         #endregion
 
         #region Chat Command
