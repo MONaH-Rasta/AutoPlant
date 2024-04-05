@@ -8,7 +8,7 @@ using Oxide.Core;
 
 namespace Oxide.Plugins
 {
-    [Info("Auto Plant", "Egor Blagov / rostov114", "1.2.3")]
+    [Info("Auto Plant", "Egor Blagov / rostov114", "1.2.4")]
     [Description("Automation of your plantations")]
     class AutoPlant : RustPlugin
     {
@@ -135,15 +135,15 @@ namespace Oxide.Plugins
             {
                 {"notAllowed", "Вам не разрешено использование данной команды!" },
                 {"changeAmount", "Количество перекладываемого удобрения изменено на {0} шт." },
-                {"currentAmount", "Текущее количество перекладываемого удобрения: {0} шт." },
+                {"currentAmount", "Текущее количество перекладываемого удобрения: {0} шт." }
             }, this, "ru");
 
             lang.RegisterMessages(new Dictionary<string, string>()
             {
                 {"notAllowed", "Вам не дозволено використання цієї команди!" },
                 {"changeAmount", "Кількість добрива, що перекладається, змінено на: {0} шт." },
-                {"currentAmount", "Поточна кількість добрива, що перекладається: {0} шт." },
-            }, this, "uk"); ​
+                {"currentAmount", "Поточна кількість добрива, що перекладається: {0} шт." }
+            }, this, "uk");
         }
 
         private string _(BasePlayer player, string key, params object[] args)
