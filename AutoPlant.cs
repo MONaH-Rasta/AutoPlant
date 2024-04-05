@@ -8,7 +8,7 @@ using Oxide.Core;
 
 namespace Oxide.Plugins
 {
-    [Info("Auto Plant", "Egor Blagov / rostov114", "1.2.1")]
+    [Info("Auto Plant", "Egor Blagov / rostov114", "1.2.2")]
     [Description("Automation of your plantations")]
     class AutoPlant : RustPlugin
     {
@@ -165,15 +165,21 @@ namespace Oxide.Plugins
 
         private object OnGrowableGather(GrowableEntity plant, BasePlayer player)
         {
-            PlanterBox planterBox = this.GetPlanterBox(player, plant, _config.autoGather);
-            if (planterBox == null)
+            List<BaseEntity> growables;
+            if (!this.GetGrowables(player, plant, _config.autoGather, out growables))
                 return null;
 
             Unsubscribe(nameof(OnGrowableGather));
-            foreach (GrowableEntity growable in planterBox.children.ToList())
+            foreach (BaseEntity growable in growables)
             {
-                if (growable != null)
-                    growable.PickFruit(player);
+                if (growable != null && growable is GrowableEntity)
+                {
+                    GrowableEntity _growable = growable as GrowableEntity;
+                    if (_growable != null)
+                    {
+                        _growable.PickFruit(player);
+                    }
+                }
             }
             Subscribe(nameof(OnGrowableGather));
 
@@ -182,15 +188,21 @@ namespace Oxide.Plugins
 
         private object CanTakeCutting(BasePlayer player, GrowableEntity plant)
         {
-            PlanterBox planterBox = this.GetPlanterBox(player, plant, _config.autoCutting);
-            if (planterBox == null)
+            List<BaseEntity> growables;
+            if (!this.GetGrowables(player, plant, _config.autoCutting, out growables))
                 return null;
 
             Unsubscribe(nameof(CanTakeCutting));
-            foreach (GrowableEntity growable in planterBox.children.ToList())
+            foreach (BaseEntity growable in growables)
             {
-                if (growable != null)
-                    growable.TakeClones(player);
+                if (growable != null && growable is GrowableEntity)
+                {
+                    GrowableEntity _growable = growable as GrowableEntity;
+                    if (_growable != null)
+                    {
+                        _growable.TakeClones(player);
+                    }
+                }
             }
             Subscribe(nameof(CanTakeCutting));
 
@@ -199,15 +211,21 @@ namespace Oxide.Plugins
 
         private object OnRemoveDying(GrowableEntity plant, BasePlayer player)
         {
-            PlanterBox planterBox = this.GetPlanterBox(player, plant, _config.autoDying);
-            if (planterBox == null)
+            List<BaseEntity> growables;
+            if (!this.GetGrowables(player, plant, _config.autoDying, out growables))
                 return null;
 
             Unsubscribe(nameof(OnRemoveDying));
-            foreach (GrowableEntity growable in planterBox.children.ToList())
+            foreach (BaseEntity growable in growables)
             {
-                if (growable != null)
-                    growable.RemoveDying(player);
+                if (growable != null && growable is GrowableEntity)
+                {
+                    GrowableEntity _growable = growable as GrowableEntity;
+                    if (_growable != null)
+                    {
+                        _growable.RemoveDying(player);
+                    }
+                }
             }
             Subscribe(nameof(OnRemoveDying));
 
@@ -373,21 +391,24 @@ namespace Oxide.Plugins
             return !target.entity.IsOccupied(target.socket) && socketBase.CheckSocketMods(socketBase.DoPlacement(target));
         }
 
-        public PlanterBox GetPlanterBox(BasePlayer player, GrowableEntity plant, string perm)
+        public bool GetGrowables(BasePlayer player, GrowableEntity plant, string perm, out List<BaseEntity> growables)
         {
+            growables = null;
+
             if (player == null || plant == null || !permission.UserHasPermission(player.UserIDString, perm))
-                return null;
+                return false;
 
-            if (player.serverInput.IsDown(BUTTON.SPRINT) && plant.GetParentEntity() is PlanterBox)
+            if (player.serverInput.IsDown(BUTTON.SPRINT))
             {
-                PlanterBox planterBox = plant.GetParentEntity() as PlanterBox;
+                PlanterBox planterBox = plant.GetPlanter();
                 if (planterBox == null || planterBox?.children == null || planterBox.children.Count == 0)
-                    return null;
+                    return false;
 
-                return planterBox;
+                growables = planterBox.children.ToList();
+                return true;
             }
 
-            return null;
+            return false;
         }
 
         private bool IsLookingPlanterBox(BasePlayer player, out PlanterBox planterBox)
