@@ -10,7 +10,7 @@ using Oxide.Core;
 
 namespace Oxide.Plugins
 {
-    [Info("Auto Plant", "Egor Blagov / rostov114", "1.2.5")]
+    [Info("Auto Plant", "Egor Blagov / rostov114", "1.2.7")]
     [Description("Automation of your plantations")]
     class AutoPlant : RustPlugin
     {
@@ -319,15 +319,15 @@ namespace Oxide.Plugins
             {
                 if (permission.UserHasPermission(player.UserIDString, _config.autoFertilizer))
                 {
-                    _activeUse.Add(player.userID);
+                    _activeUse.Add(player.userID.Get());
                     checkSubscribeHooks();
                 }
             }
             else
             {
-                if (_activeUse.Contains(player.userID))
+                if (_activeUse.Contains(player.userID.Get()))
                 {
-                    _activeUse.Remove(player.userID);
+                    _activeUse.Remove(player.userID.Get());
                     checkSubscribeHooks();
                 }
             }
@@ -335,7 +335,7 @@ namespace Oxide.Plugins
 
         private void OnPlayerInput(BasePlayer player, InputState input)
         {
-            if (_activeUse.Contains(player.userID) && input.WasJustReleased(BUTTON.FIRE_PRIMARY))
+            if (_activeUse.Contains(player.userID.Get()) && input.WasJustReleased(BUTTON.FIRE_PRIMARY))
             {
                 Item activeItem = player.GetActiveItem();
                 if (activeItem == null)
@@ -347,7 +347,7 @@ namespace Oxide.Plugins
                 PlanterBox planterBox;
                 if (IsLookingPlanterBox(player, out planterBox))
                 {
-                    int amount = Data.Get(player.userID);
+                    int amount = Data.Get(player.userID.Get());
                     Item moveItem = (amount >= activeItem.amount) ? activeItem : activeItem.SplitItem(amount);
 
                     player.Command("note.inv", (object)moveItem.info.itemid, (object)-moveItem.amount);
@@ -386,7 +386,7 @@ namespace Oxide.Plugins
 
             if (args.Length == 0)
             {
-                SendReply(player, _(player, "currentAmount", Data.Get(player.userID)));
+                SendReply(player, _(player, "currentAmount", Data.Get(player.userID.Get())));
                 return;
             }
 
@@ -397,7 +397,7 @@ namespace Oxide.Plugins
             }
             catch { }
 
-            Data.Set(player.userID, amount);
+            Data.Set(player.userID.Get(), amount);
             SendReply(player, _(player, "changeAmount", amount));
         }
         #endregion
@@ -421,7 +421,8 @@ namespace Oxide.Plugins
             common.FindMaleSockets(target, list);
             Socket_Base socketBase = list[0];
             Facepunch.Pool.FreeList(ref list);
-            return !target.entity.IsOccupied(target.socket) && socketBase.CheckSocketMods(socketBase.DoPlacement(target));
+            Construction.Placement placement = socketBase.DoPlacement(target);
+            return !target.entity.IsOccupied(target.socket) && socketBase.CheckSocketMods(ref placement);
         }
 
         public bool GetGrowables(BasePlayer player, GrowableEntity plant, string perm, out List<BaseEntity> growables)
